@@ -1,9 +1,6 @@
 # The Unofficial Guide — Project 1
 
-> **How to use this template:**
-> Complete each section *after* you've built and tested the corresponding part of your system.
-> Do not write placeholder text — if a section isn't done yet, leave it blank and come back.
-> Every section below is required for submission. One-liners will not receive full credit.
+> This is my first project for the CodePath AI201 course. I built a simple RAG-based chatbot that provides you with information about different events in the Bryan/College Station area. I designed a planning guide that helped me implement each feature one-by-one, including building a webscraper, chunking data, vectorizing it, giving it to an LLM,and then retrieving it for a coherent output.
 
 ---
 
@@ -13,6 +10,7 @@
      Why is this knowledge valuable, and why is it hard to find through official channels?
      Example: "Student reviews of CS professors at [university] — useful because official
      course descriptions don't reflect teaching style, exam difficulty, or workload." -->
+This chatbot provides the user with help on finding things to do in the Bryan/College staiton area. 
 
 ---
 
@@ -22,19 +20,21 @@
      Be specific: include URLs, subreddit names, forum thread titles, or file names.
      Aim for variety — sources that together cover different subtopics or perspectives. -->
 
-| # | Source | Type | URL or file path |
-|---|--------|------|-----------------|
-| 1 | | | |
-| 2 | | | |
-| 3 | | | |
-| 4 | | | |
-| 5 | | | |
-| 6 | | | |
-| 7 | | | |
-| 8 | | | |
-| 9 | | | |
-| 10 | | | |
+| # | Source | Description | URL or location |
+|---|--------|-------------|-----------------|
+| 1 |Reddit|A thread of places in Bryan/College Station that students recommend. |https://www.reddit.com/r/aggies/comments/13znhx2/what_are_some_things_to_doplaces_to_go_in_bryan/ |
+| 2 |Reddit |A thread of things to do in Bryan specifically |https://www.reddit.com/r/aggies/comments/1clpu1l/is_there_anything_to_do_in_bryan/ |
+| 3 |Destination Bryan |Official website of Bryan, Texas detailing the things to do there |destinationbryan.com/things-to-do/ |
+| 4 |Visit College Station |Official website of College Station, Texas detailing the things to do there |https://visit.cstx.gov/things-to-do/ |
+| 5 |TripAdvisor |List of things to do in the Bryan area |https://www.tripadvisor.com/Attractions-g55543-Activities-Bryan_Texas.html |
+| 6 |Texas A&M University |Official University Calendar of events |https://getinvolved.tamu.edu/events|
+| 7 |Reddit |Thread detailing nightlife in College Station |https://www.reddit.com/r/CollegeStation/comments/1iryy2y/night_life/ |
+| 8 | Visit College Station|Official College Station website detailing nightlife options there |https://visit.cstx.gov/things-to-do/nightlife/ |
+| 9 |Visit College Station |Official College Station events calendar |https://visit.cstx.gov/events/ |
+| 10 |Destination Bryan |Official Bryan events calendar |https://www.destinationbryan.com/events/ |
 
+
+FULL DISCLOSURE: I was not able to webscrape Reddit and TripAdvisor. I ommitted those websites, but am still keeping them here.
 ---
 
 ## Chunking Strategy
@@ -46,13 +46,25 @@
      - Any preprocessing you did before chunking (e.g., stripping HTML, removing headers)
      - What your final chunk count was across all documents -->
 
+
 **Chunk size:**
+A target of **80 tokens** with a hard cap of **256 tokens**. "Tokens" are counted with the *actual* all-MiniLM-L6-v2 tokenizer (`transformers.AutoTokenizer`), so the count is exactly what the embedding model sees. Chunking is segment-aware: each cleaned document is split into paragraphs; any paragraph longer than the target is further split on sentence boundaries; segments are then greedily packed up to the 80-token target. The result is small, focused chunks (typically a single venue/event or a couple of related lines).
 
 **Overlap:**
+**No overlap (0 tokens).** All of the documents that survived scraping are *listings* — event calendars and attraction/venue lists — where each item is self-contained, so carrying text across boundaries would just duplicate one venue into a neighbor's chunk and blur retrieval. (Overlap would matter for the planned Reddit discussion threads, where an idea spans several sentences, but those sources were blocked by anti-bot protection and are not in the corpus.)
 
 **Why these choices fit your documents:**
+1. **256-token cap = the model's real limit.** all-MiniLM-L6-v2 truncates input at 256 word-piece tokens, so anything larger would be silently cut off at embed time. The cap guarantees every chunk is fully embedded.
+2. **80-token target because the sources are listings, not prose.** A single attraction or event is short (name + address + date ≈ 30–80 tokens). Small chunks keep one or two items per vector, which sharpens retrieval precision for specific queries (e.g. "live music in downtown Bryan") instead of returning a paragraph where the relevant line is diluted.
+
+**Preprocessing before chunking:**
+- **HTML stripped** with BeautifulSoup (lxml): removed `script/style/noscript/nav/footer/header/form/svg/iframe/aside`, then extracted text from the `main`/`article`/`body` container.
+- **Encoding fixed** by parsing the raw response bytes so BeautifulSoup detects each page's own charset (some sites otherwise produced mojibake like `cafés`/`â€¦`).
+- **Whitespace normalized** (collapsed runs of spaces, paragraph breaks preserved).
+- **Boilerplate removed** with a filter that drops nav/call-to-action junk lines ("Details", "Map", "Save", "Open in Google Maps", "Learn More", "Continue Reading", "Submit Your Event", "Results 1-12 of …", e-newsletter prompts) and collapses immediately-duplicated lines (listing pages echo each venue name twice).
 
 **Final chunk count:**
+**50 chunks** across **6 documents** (Destination Bryan ×2, Visit College Station ×3, Texas A&M events). Chunk sizes range 25–80 tokens (avg ~67), all within the 256-token model limit.
 
 ---
 
